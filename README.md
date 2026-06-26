@@ -1,1 +1,1 @@
-# -inspiration-collector
+# inspiration-collector
