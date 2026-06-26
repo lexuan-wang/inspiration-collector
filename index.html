@@ -41,6 +41,14 @@
           Repository access 只选你的私有数据仓库；权限只勾 Contents (Read and write)
         </p>
       </div>
+      <div class="form-group">
+        <label>DeepSeek API Key（可选）</label>
+        <input type="password" id="setupDsKey" placeholder="sk-xxxxxxxxxxxx">
+        <p class="form-hint">
+          填了就用 AI 自动整理口语、分类、打标签、提炼洞见；留空则用基础规则整理。<br>
+          在 platform.deepseek.com 创建
+        </p>
+      </div>
       <button class="btn btn-primary btn-block" onclick="saveSetup()">&#128190; 保存并开始使用</button>
     </div>
   </div>
@@ -65,12 +73,13 @@
         <button class="btn btn-voice" id="voiceBtn" onclick="toggleVoice()">&#127908; 语音</button>
         <span class="voice-status" id="voiceStatus"></span>
         <div class="spacer"></div>
-        <button class="btn btn-ghost" onclick="cleanText()">&#10024; 整理文本</button>
+        <button class="btn btn-ghost" id="cleanBtn" onclick="cleanText()">&#10024; 整理文本</button>
       </div>
 
       <div class="cleaned-box" id="cleanedBox">
         <div class="cleaned-label">&#9989; 整理后：</div>
         <div class="cleaned-text" id="cleanedText"></div>
+        <div class="cleaned-text" id="aiInsightBox" style="margin-top:8px;color:#8e44ad;font-size:0.9em;"></div>
       </div>
 
       <!-- Context hint -->
@@ -187,6 +196,19 @@
 
   var recognition = null;
   var isRecording = false;
+  var aiInsight = '';
+
+  var CAT_MAP = {
+    '收件箱': 'inbox',
+    '学术研究': 'academic/research',
+    '博士论文': 'academic/thesis',
+    '讲座会议': 'academic/conference',
+    '讲座/会议': 'academic/conference',
+    '阅读笔记': 'academic/reading',
+    '灵感想法': 'ideas',
+    '生活随想': 'life',
+    '工作相关': 'work'
+  };
 
   // ===== Config =====
 
@@ -222,13 +244,14 @@
     var owner = document.getElementById('setupOwner').value.trim();
     var repo = document.getElementById('setupRepo').value.trim();
     var token = document.getElementById('setupToken').value.trim();
+    var dsKey = document.getElementById('setupDsKey').value.trim();
 
     if (!owner || !repo || !token) {
-      toast('请填写所有字段');
+      toast('请填写 GitHub 的三个字段');
       return;
     }
 
-    saveConfig({ owner: owner, repo: repo, token: token });
+    saveConfig({ owner: owner, repo: repo, token: token, dsKey: dsKey });
     showMain();
     toast('配置已保存');
   };
@@ -241,6 +264,7 @@
     var cfg = getConfig();
     if (cfg) {
       document.getElementById('settingRepo').textContent = cfg.owner + '/' + cfg.repo;
+      document.getElementById('cleanBtn').innerHTML = cfg.dsKey ? '✨ AI 整理' : '✨ 整理文本';
     }
     document.getElementById('settingCache').textContent = getLog().length + ' 条记录';
   }
@@ -254,6 +278,7 @@
       document.getElementById('setupOwner').value = cfg.owner || '';
       document.getElementById('setupRepo').value = cfg.repo || '';
       document.getElementById('setupToken').value = cfg.token || '';
+      document.getElementById('setupDsKey').value = cfg.dsKey || '';
     }
   };
 
@@ -286,11 +311,98 @@
   window.cleanText = function() {
     var raw = document.getElementById('rawInput').value.trim();
     if (!raw) { toast('请先输入内容'); return; }
-    var cleaned = doClean(raw);
-    document.getElementById('cleanedText').textContent = cleaned;
-    document.getElementById('cleanedBox').style.display = 'block';
-    document.getElementById('rawInput').value = cleaned;
+
+    var cfg = getConfig();
+    if (cfg && cfg.dsKey) {
+      aiProcess(raw, cfg);
+    } else {
+      var cleaned = doClean(raw);
+      document.getElementById('cleanedText').textContent = cleaned;
+      document.getElementById('aiInsightBox').textContent = '';
+      document.getElementById('cleanedBox').style.display = 'block';
+      document.getElementById('rawInput').value = cleaned;
+    }
   };
+
+  // ===== AI (DeepSeek) =====
+
+  function aiProcess(raw, cfg) {
+    var btn = document.getElementById('cleanBtn');
+    btn.disabled = true;
+    btn.innerHTML = '⏳ AI 整理中...';
+
+    var context = document.getElementById('contextHint').value.trim();
+
+    callDeepSeek(raw, context, cfg).then(function(r) {
+      document.getElementById('rawInput').value = r.cleaned;
+      document.getElementById('cleanedText').textContent = r.cleaned;
+      aiInsight = r.insight || '';
+      document.getElementById('aiInsightBox').textContent = aiInsight ? ('💡 核心洞见：' + aiInsight) : '';
+      document.getElementById('cleanedBox').style.display = 'block';
+
+      var catVal = CAT_MAP[r.category];
+      if (catVal) document.getElementById('catSelect').value = catVal;
+
+      if (r.tags && r.tags.length) {
+        document.getElementById('tagInput').value = r.tags.join(' ');
+      }
+      toast('AI 整理完成');
+    }).catch(function(err) {
+      var msg = err.message || '';
+      if (/Failed to fetch|NetworkError|CORS/i.test(msg)) {
+        toast('网络/跨域错误：DeepSeek 不允许网页直连，需加中转');
+      } else {
+        toast('AI 调用失败: ' + msg);
+      }
+    }).finally(function() {
+      btn.disabled = false;
+      btn.innerHTML = '✨ AI 整理';
+    });
+  }
+
+  function callDeepSeek(text, context, cfg) {
+    var sys = '你是一个帮助学者整理碎片化灵感的助手。用户会发来口语化的、语音转写的零散文字。' +
+      '你需要返回一个 JSON 对象，包含四个字段：\n' +
+      '1. "cleaned"：把口语化内容整理成通顺、简洁的书面表达，去掉"嗯、那个、就是说、然后"等口头禅和重复，但完整保留原意和所有观点，不要增加原文没有的内容。\n' +
+      '2. "category"：从以下分类中选最合适的一个（只能填这些之一）：收件箱、学术研究、博士论文、讲座会议、阅读笔记、灵感想法、生活随想、工作相关。\n' +
+      '3. "tags"：1到4个简短的中文标签（数组），概括主题或关键词。\n' +
+      '4. "insight"：如果内容有学术或思考价值，用一句话提炼核心洞见；如果只是日常琐事则留空字符串。\n' +
+      '只返回 JSON，不要任何额外说明。';
+
+    var userMsg = '请整理这段灵感：\n\n' + text;
+    if (context) userMsg += '\n\n补充背景：' + context;
+
+    return fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + cfg.dsKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: sys },
+          { role: 'user', content: userMsg }
+        ],
+        temperature: 0.3,
+        response_format: { type: 'json_object' }
+      })
+    }).then(function(res) {
+      if (!res.ok) {
+        return res.text().then(function(t) { throw new Error('HTTP ' + res.status + ' ' + t.slice(0, 120)); });
+      }
+      return res.json();
+    }).then(function(data) {
+      var content = data.choices[0].message.content;
+      var obj = JSON.parse(content);
+      return {
+        cleaned: obj.cleaned || text,
+        category: obj.category || '收件箱',
+        tags: Array.isArray(obj.tags) ? obj.tags : [],
+        insight: obj.insight || ''
+      };
+    });
+  }
 
   // ===== Voice =====
 
@@ -362,7 +474,7 @@
     setStatus('⏳', '正在整理文本...');
 
     setTimeout(function() {
-      var cleaned = doClean(raw);
+      var cleaned = raw;
       var cat = document.getElementById('catSelect').value;
       var tagStr = document.getElementById('tagInput').value.trim();
       var context = document.getElementById('contextHint').value.trim();
@@ -390,9 +502,11 @@
       md += 'category: ' + (catLabels[cat] || cat) + '\n';
       if (tags.length) md += 'tags: [' + tags.join(', ') + ']\n';
       if (context) md += 'context: "' + context.replace(/"/g, '\\"') + '"\n';
+      if (aiInsight) md += 'insight: "' + aiInsight.replace(/"/g, '\\"') + '"\n';
       md += '---\n\n';
       md += '# ' + getTitle(cleaned) + '\n\n';
       md += cleaned + '\n';
+      if (aiInsight) md += '\n> **💡 核心洞见：** ' + aiInsight + '\n';
       if (context) md += '\n> **背景：** ' + context + '\n';
 
       setStatus('⬆️', '正在上传到 GitHub...');
@@ -408,15 +522,18 @@
             tags: tags,
             title: getTitle(cleaned),
             text: cleaned,
+            insight: aiInsight,
             context: context,
             path: filePath
           });
 
           document.getElementById('rawInput').value = '';
           document.getElementById('cleanedBox').style.display = 'none';
+          document.getElementById('aiInsightBox').textContent = '';
           document.getElementById('tagInput').value = '';
           document.getElementById('contextHint').value = '';
           document.getElementById('catSelect').value = 'inbox';
+          aiInsight = '';
 
           renderRecent();
           toast('灵感已上传到 GitHub');
