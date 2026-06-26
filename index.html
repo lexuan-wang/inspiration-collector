@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#2c3e50">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💡</text></svg>">
+  <title>灵感收集器</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Setup Screen -->
+<div class="screen" id="setupScreen">
+  <div class="setup-box">
+    <div class="setup-icon">&#128273;</div>
+    <h1>灵感收集器</h1>
+    <p class="setup-desc">首次使用，需要配置数据仓库<br>你的灵感将以 Markdown 文件保存到你的<b>私有</b>仓库</p>
+
+    <div class="setup-form">
+      <div class="form-group">
+        <label>GitHub 用户名</label>
+        <input type="text" id="setupOwner" placeholder="例如: lexuan-wang">
+      </div>
+      <div class="form-group">
+        <label>私有数据仓库名称</label>
+        <input type="text" id="setupRepo" placeholder="例如: my-inspirations" value="my-inspirations">
+        <p class="form-hint">
+          填你的 <b>private 私有仓库</b>名（专门存灵感数据的那个），不是公开的工具仓库
+        </p>
+      </div>
+      <div class="form-group">
+        <label>Personal Access Token</label>
+        <input type="password" id="setupToken" placeholder="github_pat_xxxxxxxxxxxx">
+        <p class="form-hint">
+          在 GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens 创建<br>
+          Repository access 只选你的私有数据仓库；权限只勾 Contents (Read and write)
+        </p>
+      </div>
+      <button class="btn btn-primary btn-block" onclick="saveSetup()">&#128190; 保存并开始使用</button>
+    </div>
+  </div>
+</div>
+
+<!-- Main App -->
+<div class="screen" id="mainScreen" style="display:none;">
+  <header class="app-bar">
+    <h1>&#128161; 灵感收集器</h1>
+    <div class="app-bar-actions">
+      <button class="icon-btn" onclick="showHistory()" title="历史记录">&#128218;</button>
+      <button class="icon-btn" onclick="showSettings()" title="设置">&#9881;&#65039;</button>
+    </div>
+  </header>
+
+  <main class="main-content">
+    <!-- Input Area -->
+    <div class="card">
+      <textarea id="rawInput" rows="6" placeholder="在这里粘贴语音转写的文字，或直接输入想法...&#10;&#10;可以用口语化的方式记录，系统会自动帮你整理"></textarea>
+
+      <div class="toolbar">
+        <button class="btn btn-voice" id="voiceBtn" onclick="toggleVoice()">&#127908; 语音</button>
+        <span class="voice-status" id="voiceStatus"></span>
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" onclick="cleanText()">&#10024; 整理文本</button>
+      </div>
+
+      <div class="cleaned-box" id="cleanedBox">
+        <div class="cleaned-label">&#9989; 整理后：</div>
+        <div class="cleaned-text" id="cleanedText"></div>
+      </div>
+
+      <!-- Context hint -->
+      <div class="form-group" style="margin-top:12px;">
+        <label>补充说明（可选）</label>
+        <input type="text" id="contextHint" placeholder="例如：跟博士论文第二章有关 / 听完xx讲座的想法">
+      </div>
+
+      <!-- Category -->
+      <div class="meta-row">
+        <div class="form-group" style="flex:1;min-width:140px;">
+          <label>分类</label>
+          <select id="catSelect">
+            <option value="inbox">&#128229; 收件箱</option>
+            <option value="academic/research">&#128300; 学术研究</option>
+            <option value="academic/thesis">&#128218; 博士论文</option>
+            <option value="academic/conference">&#127891; 讲座/会议</option>
+            <option value="academic/reading">&#128214; 阅读笔记</option>
+            <option value="ideas">&#128161; 灵感想法</option>
+            <option value="life">&#127793; 生活随想</option>
+            <option value="work">&#128188; 工作相关</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex:1;min-width:140px;">
+          <label>标签（空格分隔）</label>
+          <input type="text" id="tagInput" placeholder="例如: 国际传播 方法论">
+        </div>
+      </div>
+
+      <button class="btn btn-success btn-block" onclick="submitEntry()" id="submitBtn">
+        &#128640; 整理并上传到 GitHub
+      </button>
+    </div>
+
+    <!-- Status -->
+    <div class="status-card" id="statusCard" style="display:none;">
+      <div class="status-icon" id="statusIcon">&#9203;</div>
+      <div class="status-text" id="statusText">处理中...</div>
+    </div>
+
+    <!-- Recent entries -->
+    <div class="recent-section" id="recentSection" style="display:none;">
+      <h2>&#128336; 最近上传</h2>
+      <div id="recentList"></div>
+    </div>
+  </main>
+</div>
+
+<!-- History Modal -->
+<div class="modal-bg" id="historyModal">
+  <div class="modal full">
+    <div class="modal-header">
+      <h2>&#128218; 历史记录</h2>
+      <button class="icon-btn" onclick="closeHistory()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="filter-row">
+        <input type="text" class="search-input" id="historySearch" placeholder="&#128269; 搜索..." oninput="renderHistory()">
+        <select id="historyFilter" onchange="renderHistory()">
+          <option value="">全部分类</option>
+          <option value="inbox">收件箱</option>
+          <option value="academic">学术</option>
+          <option value="ideas">灵感</option>
+          <option value="life">生活</option>
+          <option value="work">工作</option>
+        </select>
+      </div>
+      <div id="historyList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-bg" id="settingsModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>&#9881;&#65039; 设置</h2>
+      <button class="icon-btn" onclick="closeSettings()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="setting-row">
+        <div>
+          <div class="setting-name">GitHub 连接</div>
+          <div class="setting-desc" id="settingRepo">未配置</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="reconfigure()">重新配置</button>
+      </div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-name">本地缓存</div>
+          <div class="setting-desc" id="settingCache">0 条记录</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="exportLocal()">&#128196; 导出</button>
+      </div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-name">清除本地数据</div>
+          <div class="setting-desc">删除本地缓存（不影响 GitHub 上的文件）</div>
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="clearLocal()">清除</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function() {
+  'use strict';
+
+  var CFG_KEY = 'insp_cfg';
+  var LOG_KEY = 'insp_log';
+
+  var recognition = null;
+  var isRecording = false;
+
+  // ===== Config =====
+
+  function getConfig() {
+    try { return JSON.parse(localStorage.getItem(CFG_KEY)); } catch(e) { return null; }
+  }
+
+  function saveConfig(cfg) { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
+
+  function getLog() {
+    try { return JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); } catch(e) { return []; }
+  }
+
+  function addLog(entry) {
+    var log = getLog();
+    log.unshift(entry);
+    if (log.length > 200) log = log.slice(0, 200);
+    localStorage.setItem(LOG_KEY, JSON.stringify(log));
+  }
+
+  // ===== Init =====
+
+  document.addEventListener('DOMContentLoaded', function() {
+    var cfg = getConfig();
+    if (cfg && cfg.token && cfg.owner && cfg.repo) {
+      showMain();
+    }
+  });
+
+  // ===== Setup =====
+
+  window.saveSetup = function() {
+    var owner = document.getElementById('setupOwner').value.trim();
+    var repo = document.getElementById('setupRepo').value.trim();
+    var token = document.getElementById('setupToken').value.trim();
+
+    if (!owner || !repo || !token) {
+      toast('请填写所有字段');
+      return;
+    }
+
+    saveConfig({ owner: owner, repo: repo, token: token });
+    showMain();
+    toast('配置已保存');
+  };
+
+  function showMain() {
+    document.getElementById('setupScreen').style.display = 'none';
+    document.getElementById('mainScreen').style.display = 'flex';
+    renderRecent();
+
+    var cfg = getConfig();
+    if (cfg) {
+      document.getElementById('settingRepo').textContent = cfg.owner + '/' + cfg.repo;
+    }
+    document.getElementById('settingCache').textContent = getLog().length + ' 条记录';
+  }
+
+  window.reconfigure = function() {
+    closeSettings();
+    document.getElementById('mainScreen').style.display = 'none';
+    document.getElementById('setupScreen').style.display = 'flex';
+    var cfg = getConfig();
+    if (cfg) {
+      document.getElementById('setupOwner').value = cfg.owner || '';
+      document.getElementById('setupRepo').value = cfg.repo || '';
+      document.getElementById('setupToken').value = cfg.token || '';
+    }
+  };
+
+  // ===== Text Cleanup =====
+
+  var FILLERS = [
+    /[，,]?\s*(嗯+|啊+|哦+|噢+|呃+|额+)\s*[，,]?/g,
+    /(然后就是说|就是说|然后的话|就是的话|怎么说呢|怎么讲呢|怎么讲|你知道吗|你知道的|对不对|对吧|是吧|反正就是|反正|基本上就是|大概就是)/g,
+    /(那个那个|那个+|这个这个)(?=[，,。.\s])/g,
+    /然后然后/g,
+    /就是就是/g,
+    /^\s*(那+|然后)\s*[，,]/gm,
+  ];
+
+  function doClean(raw) {
+    var c = raw;
+    FILLERS.forEach(function(p) { c = c.replace(p, ''); });
+    c = c
+      .replace(/[，,]{2,}/g, '，')
+      .replace(/[。.]{2,}/g, '。')
+      .replace(/[，,]\s*[。.]/g, '。')
+      .replace(/^\s*[，,。.]+/gm, '')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/[，,]\s*$/gm, '。')
+      .trim();
+    if (c && !/[。！？!?.…]$/.test(c)) c += '。';
+    return c;
+  }
+
+  window.cleanText = function() {
+    var raw = document.getElementById('rawInput').value.trim();
+    if (!raw) { toast('请先输入内容'); return; }
+    var cleaned = doClean(raw);
+    document.getElementById('cleanedText').textContent = cleaned;
+    document.getElementById('cleanedBox').style.display = 'block';
+    document.getElementById('rawInput').value = cleaned;
+  };
+
+  // ===== Voice =====
+
+  window.toggleVoice = function() {
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { toast('请用 Chrome 浏览器使用语音功能'); return; }
+    if (isRecording) { recognition.stop(); return; }
+
+    recognition = new SR();
+    recognition.lang = 'zh-CN';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    var btn = document.getElementById('voiceBtn');
+    var st = document.getElementById('voiceStatus');
+    var ta = document.getElementById('rawInput');
+
+    recognition.onstart = function() {
+      isRecording = true;
+      btn.classList.add('recording');
+      btn.textContent = '⏹ 停止';
+      st.textContent = '正在聆听...';
+    };
+
+    recognition.onresult = function(e) {
+      var f = '', im = '';
+      for (var i = 0; i < e.results.length; i++) {
+        if (e.results[i].isFinal) f += e.results[i][0].transcript;
+        else im += e.results[i][0].transcript;
+      }
+      ta.value = (ta.getAttribute('data-base') || '') + f + im;
+    };
+
+    recognition.onend = function() {
+      isRecording = false;
+      btn.classList.remove('recording');
+      btn.textContent = '🎤 语音';
+      st.textContent = '';
+      ta.setAttribute('data-base', ta.value);
+    };
+
+    recognition.onerror = function(ev) {
+      isRecording = false;
+      btn.classList.remove('recording');
+      btn.textContent = '🎤 语音';
+      st.textContent = '';
+      if (ev.error !== 'aborted') toast('语音识别出错: ' + ev.error);
+    };
+
+    ta.setAttribute('data-base', ta.value);
+    recognition.start();
+  };
+
+  // ===== Submit =====
+
+  window.submitEntry = function() {
+    var raw = document.getElementById('rawInput').value.trim();
+    if (!raw) { toast('请先输入内容'); return; }
+
+    var cfg = getConfig();
+    if (!cfg) { toast('请先配置 GitHub'); return; }
+
+    var btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ 处理中...';
+
+    var statusCard = document.getElementById('statusCard');
+    statusCard.style.display = 'block';
+    setStatus('⏳', '正在整理文本...');
+
+    setTimeout(function() {
+      var cleaned = doClean(raw);
+      var cat = document.getElementById('catSelect').value;
+      var tagStr = document.getElementById('tagInput').value.trim();
+      var context = document.getElementById('contextHint').value.trim();
+      var tags = tagStr ? tagStr.split(/\s+/) : [];
+
+      var now = new Date();
+      var dateStr = now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate());
+      var timeStr = pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
+      var fileName = dateStr + '-' + timeStr + '.md';
+      var filePath = 'entries/' + cat + '/' + fileName;
+
+      var catLabels = {
+        'inbox': '收件箱',
+        'academic/research': '学术研究',
+        'academic/thesis': '博士论文',
+        'academic/conference': '讲座/会议',
+        'academic/reading': '阅读笔记',
+        'ideas': '灵感想法',
+        'life': '生活随想',
+        'work': '工作相关'
+      };
+
+      var md = '---\n';
+      md += 'date: ' + now.toISOString() + '\n';
+      md += 'category: ' + (catLabels[cat] || cat) + '\n';
+      if (tags.length) md += 'tags: [' + tags.join(', ') + ']\n';
+      if (context) md += 'context: "' + context.replace(/"/g, '\\"') + '"\n';
+      md += '---\n\n';
+      md += '# ' + getTitle(cleaned) + '\n\n';
+      md += cleaned + '\n';
+      if (context) md += '\n> **背景：** ' + context + '\n';
+
+      setStatus('⬆️', '正在上传到 GitHub...');
+
+      pushToGitHub(cfg, filePath, md, '✨ ' + (catLabels[cat] || cat) + ': ' + getTitle(cleaned))
+        .then(function() {
+          setStatus('✅', '上传成功！');
+
+          addLog({
+            date: now.toISOString(),
+            category: cat,
+            catLabel: catLabels[cat] || cat,
+            tags: tags,
+            title: getTitle(cleaned),
+            text: cleaned,
+            context: context,
+            path: filePath
+          });
+
+          document.getElementById('rawInput').value = '';
+          document.getElementById('cleanedBox').style.display = 'none';
+          document.getElementById('tagInput').value = '';
+          document.getElementById('contextHint').value = '';
+          document.getElementById('catSelect').value = 'inbox';
+
+          renderRecent();
+          toast('灵感已上传到 GitHub');
+
+          setTimeout(function() { statusCard.style.display = 'none'; }, 3000);
+        })
+        .catch(function(err) {
+          setStatus('❌', '上传失败: ' + err.message);
+          toast('上传失败，请检查配置');
+        })
+        .finally(function() {
+          btn.disabled = false;
+          btn.textContent = '🚀 整理并上传到 GitHub';
+        });
+    }, 100);
+  };
+
+  function getTitle(text) {
+    var first = text.split(/[。！？\n]/)[0] || text;
+    if (first.length > 30) first = first.substring(0, 30) + '...';
+    return first;
+  }
+
+  function setStatus(icon, text) {
+    document.getElementById('statusIcon').textContent = icon;
+    document.getElementById('statusText').textContent = text;
+  }
+
+  // ===== GitHub API =====
+
+  function pushToGitHub(cfg, path, content, message) {
+    var url = 'https://api.github.com/repos/' + cfg.owner + '/' + cfg.repo + '/contents/' + path;
+
+    return fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Authorization': 'Bearer ' + cfg.token,
+        'Content-Type': 'application/json',
+        'Accept': 'application/vnd.github+json'
+      },
+      body: JSON.stringify({
+        message: message,
+        content: btoa(unescape(encodeURIComponent(content)))
+      })
+    }).then(function(res) {
+      if (!res.ok) {
+        return res.json().then(function(data) {
+          throw new Error(data.message || 'HTTP ' + res.status);
+        });
+      }
+      return res.json();
+    });
+  }
+
+  // ===== Recent =====
+
+  function renderRecent() {
+    var log = getLog();
+    var section = document.getElementById('recentSection');
+    var list = document.getElementById('recentList');
+
+    if (log.length === 0) {
+      section.style.display = 'none';
+      return;
+    }
+
+    section.style.display = 'block';
+    var recent = log.slice(0, 5);
+
+    list.innerHTML = recent.map(function(e) {
+      var d = new Date(e.date);
+      var ts = pad(d.getMonth()+1) + '/' + pad(d.getDate()) + ' ' +
+        pad(d.getHours()) + ':' + pad(d.getMinutes());
+      var tagHtml = (e.tags || []).map(function(t) {
+        return '<span class="mini-tag">#' + esc(t) + '</span>';
+      }).join('');
+
+      return '<div class="recent-item">' +
+        '<div class="recent-top">' +
+          '<span class="recent-time">' + ts + '</span>' +
+          '<span class="recent-cat">' + esc(e.catLabel || e.category) + '</span>' +
+        '</div>' +
+        '<div class="recent-title">' + esc(e.title) + '</div>' +
+        (tagHtml ? '<div class="recent-tags">' + tagHtml + '</div>' : '') +
+      '</div>';
+    }).join('');
+  }
+
+  // ===== History =====
+
+  window.showHistory = function() {
+    document.getElementById('historyModal').classList.add('open');
+    renderHistory();
+  };
+
+  window.closeHistory = function() {
+    document.getElementById('historyModal').classList.remove('open');
+  };
+
+  window.renderHistory = function() {
+    var log = getLog();
+    var search = (document.getElementById('historySearch').value || '').toLowerCase();
+    var filterCat = document.getElementById('historyFilter').value;
+
+    var filtered = log.filter(function(e) {
+      if (filterCat && (e.category || '').indexOf(filterCat) === -1) return false;
+      if (search) {
+        return (e.text || '').toLowerCase().indexOf(search) !== -1 ||
+          (e.title || '').toLowerCase().indexOf(search) !== -1 ||
+          (e.tags || []).some(function(t) { return t.toLowerCase().indexOf(search) !== -1; });
+      }
+      return true;
+    });
+
+    var list = document.getElementById('historyList');
+    if (filtered.length === 0) {
+      list.innerHTML = '<div class="empty">暂无记录</div>';
+      return;
+    }
+
+    list.innerHTML = filtered.map(function(e) {
+      var d = new Date(e.date);
+      var ts = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + ' ' +
+        pad(d.getHours()) + ':' + pad(d.getMinutes());
+      var tagHtml = (e.tags || []).map(function(t) {
+        return '<span class="mini-tag">#' + esc(t) + '</span>';
+      }).join('');
+
+      return '<div class="history-item">' +
+        '<div class="history-top">' +
+          '<span class="history-time">' + ts + '</span>' +
+          '<span class="recent-cat">' + esc(e.catLabel || e.category) + '</span>' +
+        '</div>' +
+        '<div class="history-text">' + esc(e.text || '') + '</div>' +
+        (e.context ? '<div class="history-context">💡 ' + esc(e.context) + '</div>' : '') +
+        (tagHtml ? '<div class="recent-tags">' + tagHtml + '</div>' : '') +
+      '</div>';
+    }).join('');
+  };
+
+  // ===== Settings =====
+
+  window.showSettings = function() {
+    var cfg = getConfig();
+    if (cfg) document.getElementById('settingRepo').textContent = cfg.owner + '/' + cfg.repo;
+    document.getElementById('settingCache').textContent = getLog().length + ' 条记录';
+    document.getElementById('settingsModal').classList.add('open');
+  };
+
+  window.closeSettings = function() {
+    document.getElementById('settingsModal').classList.remove('open');
+  };
+
+  window.exportLocal = function() {
+    var log = getLog();
+    if (!log.length) { toast('没有数据'); return; }
+
+    var md = '# 灵感收集导出\n\n';
+    md += '> 导出时间：' + new Date().toLocaleString('zh-CN') + '\n\n';
+
+    var grouped = {};
+    log.forEach(function(e) {
+      var cat = e.catLabel || e.category || '未分类';
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(e);
+    });
+
+    Object.keys(grouped).forEach(function(cat) {
+      md += '## ' + cat + '\n\n';
+      grouped[cat].forEach(function(e) {
+        md += '### ' + new Date(e.date).toLocaleString('zh-CN') + '\n\n';
+        md += (e.text || '') + '\n\n';
+        if (e.context) md += '> ' + e.context + '\n\n';
+        if (e.tags && e.tags.length) md += '标签：' + e.tags.map(function(t){ return '`' + t + '`'; }).join(' ') + '\n\n';
+        md += '---\n\n';
+      });
+    });
+
+    var blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = '灵感收集_' + fdate() + '.md';
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('导出成功');
+  };
+
+  window.clearLocal = function() {
+    if (!confirm('确定清除本地缓存？GitHub 上的文件不受影响。')) return;
+    localStorage.removeItem(LOG_KEY);
+    renderRecent();
+    document.getElementById('settingCache').textContent = '0 条记录';
+    toast('本地缓存已清除');
+  };
+
+  // ===== Utils =====
+
+  function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+  function fdate() {
+    var d = new Date();
+    return d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate());
+  }
+
+  function toast(msg) {
+    var t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(function() { t.classList.remove('show'); }, 3000);
+  }
+
+  // Close modals on bg click
+  document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('modal-bg') && e.target.classList.contains('open')) {
+      e.target.classList.remove('open');
+    }
+  });
+
+  // Register service worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(function() {});
+  }
+
+})();
+</script>
+</body>
+</html>
