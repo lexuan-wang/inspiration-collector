@@ -1,0 +1,9 @@
+# 同步脚本生成的本地文件（含 token，切勿提交）
+.sync_config.json
+.repo_cache/
+sync.log
+
+# 系统/编辑器
+.DS_Store
+__pycache__/
+*.pyc
