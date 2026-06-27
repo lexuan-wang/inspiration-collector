@@ -504,9 +504,8 @@
       if (context) md += 'context: "' + context.replace(/"/g, '\\"') + '"\n';
       if (aiInsight) md += 'insight: "' + aiInsight.replace(/"/g, '\\"') + '"\n';
       md += '---\n\n';
-      md += '# ' + getTitle(cleaned) + '\n\n';
+      if (aiInsight) md += '> **💡 核心洞见：** ' + aiInsight + '\n\n';
       md += cleaned + '\n';
-      if (aiInsight) md += '\n> **💡 核心洞见：** ' + aiInsight + '\n';
       if (context) md += '\n> **背景：** ' + context + '\n';
 
       setStatus('⬆️', '正在上传到 GitHub...');
