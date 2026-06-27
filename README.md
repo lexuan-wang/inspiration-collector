@@ -14,7 +14,7 @@ inspiration-collector     my-inspirations
 
 - **工具网页是公开的，但里面没有任何数据** —— 别人打开只看到登录框
 - **你的灵感全部写进私有仓库 B** —— 谁都看不到
-- **token 和 API Key 只存在你手机浏览器里** —— 永不上传
+- **token 和 API Key 只存在你浏览器里** —— 永不上传
 
 ---
 
@@ -22,7 +22,7 @@ inspiration-collector     my-inspirations
 
 工具支持接入 **DeepSeek API**，把口语化的零散文字自动整理成书面表达，并自动完成分类、打标签、提炼一句「核心洞见」。
 
-- **填了 DeepSeek Key** → 按钮显示「✨ AI 整理」，点一下由 AI 整理（去口语化但保留原意）、自动选好分类、自动填标签、底部显示紫色「💡 核心洞见」。
+- **填了 DeepSeek Key** → 按钮显示「✨ AI 整理」，点一下由 AI 整理（去口语化但保留原意）、自动选好分类、自动填标签、显示紫色「💡 核心洞见」。
 - **留空** → 按钮显示「✨ 整理文本」，回退到本地正则规则做基础口语清理，不联网、不花钱。
 
 > Key 在 [platform.deepseek.com](https://platform.deepseek.com) 创建（`sk-...`），只存在你浏览器的 localStorage，调用时浏览器直接请求 DeepSeek，不经过任何第三方服务器。
@@ -55,7 +55,7 @@ inspiration-collector     my-inspirations
 GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → Generate new token：
 - **Repository access**：只选你的**私有数据仓库** `my-inspirations`
 - **Permissions** → Repository permissions → **Contents** 设为 **Read and write**
-- 生成后复制 token（`github_pat_...`）
+- 在「生成成功」那一屏**立即整串复制** token（`github_pat_...`，离开页面后就看不到完整值了）
 
 ### 第 4 步（可选）：创建 DeepSeek API Key
 
@@ -73,14 +73,39 @@ GitHub → Settings → Developer settings → Personal access tokens → **Fine
 ```bash
 python3 sync.py
 ```
-首次运行会问你**私有数据仓库地址**和 **Obsidian Vault 路径**，之后自动拉取所有灵感。
+首次运行会依次询问：**私有数据仓库地址**、**GitHub Token**、**Obsidian Vault 路径**、**目标文件夹**；配置保存在本地 `.sync_config.json`（含 token，已被 `.gitignore` 忽略）。
 
-可设为定时任务（macOS）：
-```bash
-crontab -e
-# 每 30 分钟同步一次
-*/30 * * * * cd /path/to/inspiration-collector && python3 sync.py >> sync.log 2>&1
+> - 同步通过 **GitHub API（HTTPS）** 下载，**不依赖 git**，在 git 协议受限的网络下也能用。
+> - macOS 上若报 `CERTIFICATE_VERIFY_FAILED`，装一下证书包：`python3 -m pip install --user certifi`。
+
+#### 自动同步（macOS，launchd）
+
+新建 `~/Library/LaunchAgents/com.你的名字.inspsync.plist`，每 30 分钟自动同步一次（登录时也跑一次）：
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.你的名字.inspsync</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/你的名字/inspiration-collector/sync.py</string>
+  </array>
+  <key>StartInterval</key><integer>1800</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/Users/你的名字/inspiration-collector/sync.log</string>
+  <key>StandardErrorPath</key><string>/Users/你的名字/inspiration-collector/sync.log</string>
+</dict>
+</plist>
 ```
+- `python3` 路径用 `which python3` 查到的实际路径（要和装了 certifi 的那个 Python 一致）。
+- 加载：`launchctl load ~/Library/LaunchAgents/com.你的名字.inspsync.plist`
+- 看日志：`cat ~/inspiration-collector/sync.log`
+- Vault 在 `~/Documents` 时，首次运行若弹窗请求访问「文稿」文件夹，点**允许**。
+
+> 想随时手动拉一次：再跑一遍 `python3 sync.py` 即可，或做一个双击运行该命令的 `.command` 文件放桌面。
 
 ---
 
@@ -95,7 +120,7 @@ crontab -e
 
 ## 数据格式
 
-每条灵感存为带 frontmatter 的 Markdown，可直接被 Obsidian 识别（`insight` 仅在 AI 提炼出核心洞见时出现）：
+每条灵感存为带 frontmatter 的 Markdown，可直接被 Obsidian 识别。标题用文件名（时间戳），正文**先放核心洞见当总结、再放整理后的原文**（`insight` 仅在 AI 提炼出核心洞见时出现）：
 
 ```markdown
 ---
@@ -106,11 +131,9 @@ insight: "可将规范竞争概念引入论文分析框架"
 context: "听完xx讲座的想法"
 ---
 
-# 关于规范竞争的初步思考
+> **💡 核心洞见：** 可将规范竞争概念引入论文分析框架
 
 整理后的正文内容……
-
-> **💡 核心洞见：** 可将规范竞争概念引入论文分析框架
 
 > **背景：** 听完xx讲座的想法
 ```
